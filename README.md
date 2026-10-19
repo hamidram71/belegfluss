@@ -1,6 +1,6 @@
 # Belegfluss
 
-**An AI agent that reconciles supplier invoices with purchase orders, delivery notes and framework contracts, and only escalates what a human really needs to look at.**
+**An AI agent (in development) that reconciles supplier invoices with purchase orders, delivery notes and framework contracts, and only escalates what a human really needs to look at.**
 
 [![CI](https://github.com/<your-github-user>/belegfluss/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-github-user>/belegfluss/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%20%7C%203.15-blue)
