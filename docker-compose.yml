@@ -1,0 +1,13 @@
+# Local stack. PostgreSQL with pgvector joins in week 3 (RAG over framework contracts).
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      BELEGFLUSS_ENVIRONMENT: docker
+    volumes:
+      - documents:/app/var/documents
+
+volumes:
+  documents:

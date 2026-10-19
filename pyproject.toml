@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "belegfluss"
+version = "0.1.0"
+description = "AI agent for three-way matching of invoices, delivery notes, purchase orders and framework contracts (German B2B, E-Rechnung ready)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "Hamid" }]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "python-multipart>=0.0.9",
+  "pypdf>=4.3",
+  "drafthorse>=2025.2.0",
+  "pymupdf>=1.24",
+  "pillow>=10.4",
+]
+
+[project.optional-dependencies]
+synth = ["faker>=28.0", "reportlab>=4.2"]
+dev = [
+  "belegfluss[synth]",
+  "pytest>=8.3",
+  "pytest-cov>=5.0",
+  "httpx>=0.27",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[project.scripts]
+belegfluss-synth = "belegfluss.synth.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/belegfluss"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "N", "RUF"]
+# German document text legitimately contains characters such as "–" and "§".
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# ``Decimal as D`` keeps money assertions in tests readable.
+"tests/*" = ["N817"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["reportlab.*", "drafthorse.*", "fitz.*", "pymupdf.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+  "ignore:Using `httpx` with `starlette.testclient`",
+  # PyMuPDF still references typing.ByteString (removed in Python 3.17); not our code.
+  "ignore:'typing.ByteString' and 'collections.abc.ByteString' are deprecated:DeprecationWarning:pymupdf",
+]
