@@ -7,6 +7,7 @@ from pydantic import Field
 from belegfluss.domain.discrepancies import Decision, Discrepancy
 from belegfluss.domain.documents import DocumentFormat, DocumentKind
 from belegfluss.domain.models import DeliveryNote, Invoice, Model, PurchaseOrder
+from belegfluss.synth.attacks import Attack
 
 
 class DocumentRef(Model):
@@ -28,6 +29,9 @@ class GroundTruthSet(Model):
     variations: list[str] = Field(
         description="Legitimate deviations that must NOT be flagged, e.g. partial_delivery."
     )
+    attack: Attack | None = Field(
+        default=None, description="Prompt-injection attack planted in one document, if any."
+    )
 
 
 class Manifest(Model):
@@ -41,3 +45,4 @@ class Manifest(Model):
     invoice_formats: dict[str, int]
     delivery_note_formats: dict[str, int]
     variations: dict[str, int]
+    attacks: dict[str, int] = Field(default_factory=dict)

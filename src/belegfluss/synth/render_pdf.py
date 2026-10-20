@@ -149,12 +149,21 @@ def _build(story: Story) -> bytes:
         rightMargin=20 * mm,
         topMargin=15 * mm,
         bottomMargin=15 * mm,
+        invariant=True,  # no timestamp or random ID: same input, same bytes
     )
     doc.build(story)
     return buffer.getvalue()
 
 
-def render_invoice_pdf(invoice: Invoice) -> bytes:
+def _planted_note(text: str, hidden: bool) -> Paragraph:
+    """Text planted for prompt-injection tests: white 1 pt (hidden) or a visible remark."""
+    if hidden:
+        style = ParagraphStyle("hidden", fontSize=1, leading=1.2, textColor=colors.white)
+        return Paragraph(escape(text), style)
+    return _p(f"Bemerkung: {text}", "small")
+
+
+def render_invoice_pdf(invoice: Invoice, planted: str | None = None, hidden: bool = True) -> bytes:
     seller = invoice.seller
     accent = _accent(seller)
     meta = [
@@ -233,11 +242,15 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
             ]
         )
     )
+    if planted:
+        story.append(_planted_note(planted, hidden))
     story += _footer(seller)
     return _build(story)
 
 
-def render_delivery_note_pdf(note: DeliveryNote) -> bytes:
+def render_delivery_note_pdf(
+    note: DeliveryNote, planted: str | None = None, hidden: bool = True
+) -> bytes:
     supplier = note.supplier
     accent = _accent(supplier)
     meta = [
@@ -258,6 +271,8 @@ def render_delivery_note_pdf(note: DeliveryNote) -> bytes:
         Spacer(1, 12 * mm),
         _signatures("Datum, Unterschrift Empfänger", "Name in Druckbuchstaben"),
     ]
+    if planted:
+        story.append(_planted_note(planted, hidden))
     story += _footer(supplier.model_copy(update={"iban": None}))
     return _build(story)
 

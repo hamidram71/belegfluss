@@ -16,6 +16,7 @@ htmlcov/
 # Local data: generated datasets and uploaded documents are never committed
 data/
 var/
+reports/
 
 # Secrets
 .env

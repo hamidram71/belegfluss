@@ -3,8 +3,8 @@
 * ``XRECHNUNG_GUIDELINE``: the German XRechnung CIUS, used for pure XML invoices.
 * ``EN16931_GUIDELINE``: the plain EN 16931 profile, embedded in ZUGFeRD hybrid PDFs.
 
-Output is validated against the Factur-X EN 16931 XSD by drafthorse. Business-rule
-validation (Schematron, KoSIT validator) follows in week 2, see docs/adr/0001.
+Output is validated against the Factur-X EN 16931 XSD by drafthorse. XRechnung business
+rules (KoSIT Schematron) are not checked yet; see "Known limitations" in the README.
 """
 
 from __future__ import annotations

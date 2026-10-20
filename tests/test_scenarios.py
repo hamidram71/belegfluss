@@ -106,3 +106,13 @@ def test_contract_clauses_reference_existing_ids(world: World) -> None:
             assert ref in ids
         if contract.volume_discount:
             assert contract.volume_discount.clause_id in ids
+
+
+def test_no_line_carries_two_price_labels(world: World) -> None:
+    """Regression: two price errors on one line overwrote each other, leaving a stale label."""
+    price_types = {DiscrepancyType.PRICE_ABOVE_CONTRACT, DiscrepancyType.VOLUME_DISCOUNT_MISSING}
+    rng = random.Random(42)
+    for index in range(1, 400):
+        generated = generate_set(rng, world, index, p_discrepant=1.0)
+        positions = [d.position for d in generated.discrepancies if d.type in price_types]
+        assert len(positions) == len(set(positions)), generated.set_id

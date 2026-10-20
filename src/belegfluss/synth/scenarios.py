@@ -28,7 +28,7 @@ from belegfluss.domain.models import (
 )
 from belegfluss.domain.money import format_unit_price_de, to_unit_price
 from belegfluss.synth.catalog import by_sku
-from belegfluss.synth.world import Supplier, World, new_iban
+from belegfluss.synth.world import Supplier, World, ascii_slug, new_iban
 
 ORDER_PERIOD_START = date(2026, 3, 2)
 ORDER_PERIOD_DAYS = 200
@@ -159,7 +159,7 @@ def _build_delivery(
                 unit=item.unit,
             )
         )
-    prefix = order.supplier.name[:3].upper().replace(" ", "X")
+    prefix = (ascii_slug(order.supplier.name)[:3] or "lsx").upper()
     note = DeliveryNote(
         delivery_note_number=f"LS-{prefix}-{number:06d}",
         delivery_date=delivery_date,
@@ -204,6 +204,17 @@ def _ordered_lines(draft: DraftSet) -> list[LineItem]:
     return [i for i in draft.invoice_items if i.sku in ordered]
 
 
+def _price_free_lines(draft: DraftSet) -> list[LineItem]:
+    """Ordered lines without a price discrepancy yet. Two price errors on one line would
+    overwrite each other and leave a stale label in the ground truth."""
+    taken = {
+        d.position
+        for d in draft.discrepancies
+        if d.type in (DiscrepancyType.PRICE_ABOVE_CONTRACT, DiscrepancyType.VOLUME_DISCOUNT_MISSING)
+    }
+    return [i for i in _ordered_lines(draft) if i.position not in taken]
+
+
 def _replace_item(draft: DraftSet, position: int, **update: object) -> None:
     draft.invoice_items = [
         i.model_copy(update=update) if i.position == position else i for i in draft.invoice_items
@@ -212,7 +223,7 @@ def _replace_item(draft: DraftSet, position: int, **update: object) -> None:
 
 def _inject_price_above_contract(draft: DraftSet, rng: random.Random) -> bool:
     contract = draft.supplier.contract
-    candidates = [i for i in _ordered_lines(draft) if contract.price_for(i.sku) is not None]
+    candidates = [i for i in _price_free_lines(draft) if contract.price_for(i.sku) is not None]
     if not candidates:
         return False
     item = rng.choice(candidates)
@@ -244,7 +255,7 @@ def _inject_volume_discount_missing(draft: DraftSet, rng: random.Random) -> bool
     ordered = {o.sku: o.quantity for o in draft.purchase_order.items}
     candidates = [
         i
-        for i in _ordered_lines(draft)
+        for i in _price_free_lines(draft)
         if contract.price_for(i.sku) is not None and ordered[i.sku] >= discount.min_quantity
     ]
     if not candidates:

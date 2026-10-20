@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 
 from belegfluss import __version__
-from belegfluss.api.routes import documents, health
+from belegfluss.api.routes import documents, health, matches
 
 
 def create_app() -> FastAPI:
@@ -15,6 +15,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(documents.router)
+    app.include_router(matches.router)
     return app
 
 

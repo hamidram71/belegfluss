@@ -82,8 +82,15 @@ class LocalDocumentStore:
             embedded_einvoice=attachment,
         )
         (self.root / f"{document.document_id}.bin").write_bytes(data)
-        self._meta_path(document.document_id).write_text(document.model_dump_json(indent=2))
+        self._meta_path(document.document_id).write_text(
+            document.model_dump_json(indent=2), encoding="utf-8"
+        )
         return document
+
+    def read(self, document_id: str) -> bytes | None:
+        if self.get(document_id) is None:
+            return None
+        return (self.root / f"{document_id}.bin").read_bytes()
 
     def get(self, document_id: str) -> StoredDocument | None:
         try:
@@ -93,4 +100,4 @@ class LocalDocumentStore:
         path = self._meta_path(document_id)
         if not path.exists():
             return None
-        return StoredDocument.model_validate(json.loads(path.read_text()))
+        return StoredDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))

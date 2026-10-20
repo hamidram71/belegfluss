@@ -4,7 +4,8 @@ Layout::
 
     <out>/
       manifest.json
-      master_data/buyer.json, suppliers.json      # buyer's ERP master data (incl. IBANs)
+      master_data/buyer.json, suppliers.json,     # buyer's ERP master data: bank accounts,
+                  products.json                   # payment terms, contracts, VAT rates
       contracts/RV-2026-001.pdf ...               # framework contracts (input for RAG)
       sets/SET-0001/purchase_order.json           # ERP export
                     delivery_note.pdf | .png      # digital or scanned
@@ -22,6 +23,7 @@ from pathlib import Path
 
 from belegfluss import __version__
 from belegfluss.domain.documents import DocumentFormat, DocumentKind
+from belegfluss.synth.attacks import Attack, make_attack
 from belegfluss.synth.ground_truth import DocumentRef, GroundTruthSet, Manifest
 from belegfluss.synth.render_pdf import (
     render_contract_pdf,
@@ -31,7 +33,7 @@ from belegfluss.synth.render_pdf import (
 from belegfluss.synth.render_xml import render_invoice_xml, render_zugferd_pdf
 from belegfluss.synth.scan import pdf_to_scan_png
 from belegfluss.synth.scenarios import GeneratedSet, generate_set
-from belegfluss.synth.world import build_world
+from belegfluss.synth.world import build_world, master_data_from_world
 
 INVOICE_FORMATS: dict[DocumentFormat, float] = {
     DocumentFormat.XRECHNUNG_CII: 0.45,
@@ -61,10 +63,18 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def _render_invoice(generated: GeneratedSet, fmt: DocumentFormat, rng: random.Random) -> bytes:
+def _planted(attack: Attack | None, kind: DocumentKind) -> tuple[str | None, bool]:
+    if attack is None or attack.document is not kind:
+        return None, True
+    return attack.text, attack.technique == "hidden_text"
+
+
+def _render_invoice(
+    generated: GeneratedSet, fmt: DocumentFormat, rng: random.Random, attack: Attack | None
+) -> bytes:
     if fmt is DocumentFormat.XRECHNUNG_CII:
         return render_invoice_xml(generated.invoice)
-    pdf = render_invoice_pdf(generated.invoice)
+    pdf = render_invoice_pdf(generated.invoice, *_planted(attack, DocumentKind.INVOICE))
     if fmt is DocumentFormat.ZUGFERD_PDF:
         return render_zugferd_pdf(generated.invoice, pdf)
     if fmt is DocumentFormat.SCAN:
@@ -72,8 +82,12 @@ def _render_invoice(generated: GeneratedSet, fmt: DocumentFormat, rng: random.Ra
     return pdf
 
 
-def _render_delivery(generated: GeneratedSet, fmt: DocumentFormat, rng: random.Random) -> bytes:
-    pdf = render_delivery_note_pdf(generated.delivery_note)
+def _render_delivery(
+    generated: GeneratedSet, fmt: DocumentFormat, rng: random.Random, attack: Attack | None
+) -> bytes:
+    pdf = render_delivery_note_pdf(
+        generated.delivery_note, *_planted(attack, DocumentKind.DELIVERY_NOTE)
+    )
     return pdf_to_scan_png(pdf, rng) if fmt is DocumentFormat.SCAN else pdf
 
 
@@ -84,14 +98,24 @@ def write_dataset(
     p_discrepant: float = 0.45,
     n_suppliers: int = 12,
     progress: Callable[[int, int], None] | None = None,
+    adversarial: float = 0.0,
 ) -> Manifest:
+    """``adversarial`` is the share of sets with a planted prompt-injection attack. Attacks use
+    their own random stream, so with ``adversarial=0`` the dataset is unchanged."""
     world = build_world(seed, n_suppliers)
+    attack_rng = random.Random(seed + 1000)
+    attack_counts: Counter[str] = Counter()
     rng = random.Random(seed + 1)
 
     _write_json(out_dir / "master_data" / "buyer.json", world.buyer.model_dump(mode="json"))
+    master = master_data_from_world(world)
     _write_json(
         out_dir / "master_data" / "suppliers.json",
-        [s.party.model_dump(mode="json") for s in world.suppliers],
+        [s.model_dump(mode="json") for s in master.suppliers],
+    )
+    _write_json(
+        out_dir / "master_data" / "products.json",
+        [p.model_dump(mode="json") for p in master.products],
     )
     for supplier in world.suppliers:
         contract = supplier.contract
@@ -111,6 +135,13 @@ def write_dataset(
         set_dir = out_dir / "sets" / generated.set_id
         invoice_fmt = _pick(rng, INVOICE_FORMATS)
         delivery_fmt = _pick(rng, DELIVERY_NOTE_FORMATS)
+        attack = (
+            make_attack(attack_rng, invoice_fmt, delivery_fmt)
+            if adversarial > 0 and attack_rng.random() < adversarial
+            else None
+        )
+        if attack:
+            attack_counts[f"{attack.goal}/{attack.technique}"] += 1
 
         refs = [
             DocumentRef(
@@ -132,8 +163,8 @@ def write_dataset(
         _write_json(
             set_dir / "purchase_order.json", generated.purchase_order.model_dump(mode="json")
         )
-        (out_dir / refs[1].path).write_bytes(_render_delivery(generated, delivery_fmt, rng))
-        (out_dir / refs[2].path).write_bytes(_render_invoice(generated, invoice_fmt, rng))
+        (out_dir / refs[1].path).write_bytes(_render_delivery(generated, delivery_fmt, rng, attack))
+        (out_dir / refs[2].path).write_bytes(_render_invoice(generated, invoice_fmt, rng, attack))
 
         truth = GroundTruthSet(
             set_id=generated.set_id,
@@ -146,6 +177,7 @@ def write_dataset(
             discrepancies=generated.discrepancies,
             decision=generated.decision,
             variations=generated.variations,
+            attack=attack,
         )
         _write_json(
             out_dir / "ground_truth" / "sets" / f"{generated.set_id}.json",
@@ -171,6 +203,7 @@ def write_dataset(
         invoice_formats=dict(sorted(counters["invoice"].items())),
         delivery_note_formats=dict(sorted(counters["delivery"].items())),
         variations=dict(sorted(counters["variation"].items())),
+        attacks=dict(sorted(attack_counts.items())),
     )
     _write_json(out_dir / "manifest.json", manifest.model_dump(mode="json"))
     return manifest

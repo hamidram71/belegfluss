@@ -22,6 +22,12 @@ def main(argv: list[str] | None = None) -> int:
         help="share of sets that contain at least one discrepancy",
     )
     parser.add_argument("--force", action="store_true", help="write into a non-empty directory")
+    parser.add_argument(
+        "--adversarial",
+        type=float,
+        default=0.0,
+        help="share of sets with a planted prompt-injection attack (test set for ADR 0009)",
+    )
     args = parser.parse_args(argv)
 
     if args.out.exists() and any(args.out.iterdir()) and not args.force:
@@ -33,7 +39,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {done}/{total} sets", file=sys.stderr)
 
     manifest = write_dataset(
-        args.out, args.sets, args.seed, args.p_discrepant, args.suppliers, progress
+        args.out,
+        args.sets,
+        args.seed,
+        args.p_discrepant,
+        args.suppliers,
+        progress,
+        args.adversarial,
     )
     print(manifest.model_dump_json(indent=2))
     return 0

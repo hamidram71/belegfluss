@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "belegfluss"
-version = "0.1.0"
+version = "0.3.1"
 description = "AI agent for three-way matching of invoices, delivery notes, purchase orders and framework contracts (German B2B, E-Rechnung ready)."
 readme = "README.md"
 license = { text = "MIT" }
@@ -17,9 +17,16 @@ dependencies = [
   "pydantic-settings>=2.4",
   "python-multipart>=0.0.9",
   "pypdf>=4.3",
+  "lxml>=5.2",
+  "openai>=2.0",
   "drafthorse>=2025.2.0",
   "pymupdf>=1.24",
   "pillow>=10.4",
+  "psycopg[binary]>=3.2",
+  "pgvector>=0.3",
+  "numpy>=2.0",
+  "langgraph>=1.0",
+  "mcp>=2.3",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +42,8 @@ dev = [
 
 [project.scripts]
 belegfluss-synth = "belegfluss.synth.cli:main"
+belegfluss-eval = "belegfluss.evaluation.cli:main"
+belegfluss-mcp = "belegfluss.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/belegfluss"]
@@ -60,7 +69,7 @@ plugins = ["pydantic.mypy"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["reportlab.*", "drafthorse.*", "fitz.*", "pymupdf.*"]
+module = ["reportlab.*", "drafthorse.*", "fitz.*", "pymupdf.*", "lxml.*", "pgvector.*", "langgraph.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

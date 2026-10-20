@@ -12,12 +12,12 @@ def test_dataset_layout_and_manifest(small_dataset: tuple[Path, Manifest]) -> No
     assert manifest.n_sets == 8
     assert sum(manifest.decisions.values()) == 8
     assert len(list((root / "contracts").glob("*.pdf"))) == 4
-    assert json.loads((root / "manifest.json").read_text())["seed"] == 11
+    assert json.loads((root / "manifest.json").read_text(encoding="utf-8"))["seed"] == 11
 
     truths = sorted((root / "ground_truth" / "sets").glob("*.json"))
     assert len(truths) == 8
     for path in truths:
-        truth = GroundTruthSet.model_validate_json(path.read_text())
+        truth = GroundTruthSet.model_validate_json(path.read_text(encoding="utf-8"))
         for ref in truth.documents:
             assert (root / ref.path).is_file()
             assert ref.path.startswith("sets/")
@@ -35,4 +35,4 @@ def test_ground_truth_never_inside_input_folders(small_dataset: tuple[Path, Mani
 def test_cli_refuses_non_empty_directory(tmp_path: Path) -> None:
     (tmp_path / "existing.txt").write_text("keep me")
     assert main(["--out", str(tmp_path), "--sets", "1"]) == 1
-    assert (tmp_path / "existing.txt").read_text() == "keep me"
+    assert (tmp_path / "existing.txt").read_text(encoding="utf-8") == "keep me"

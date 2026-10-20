@@ -23,7 +23,8 @@ from belegfluss.domain.models import (
     VolumeDiscount,
 )
 from belegfluss.domain.money import format_unit_price_de, to_unit_price
-from belegfluss.synth.catalog import SUPPLIER_PROFILES, CatalogItem, items_in
+from belegfluss.master_data import MasterData, Product, SupplierRecord
+from belegfluss.synth.catalog import CATALOG, SUPPLIER_PROFILES, CatalogItem, items_in
 
 CONTRACT_START = date(2026, 1, 1)
 CONTRACT_END = date(2027, 12, 31)
@@ -94,9 +95,17 @@ def _company_name(rng: random.Random, fake: Faker) -> str:
     return name
 
 
+_TRANSLIT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def ascii_slug(text: str) -> str:
+    """Lower-case ASCII slug, with German umlauts transliterated (Müller -> mueller)."""
+    return "".join(ch for ch in text.lower().translate(_TRANSLIT) if ch.isascii() and ch.isalnum())
+
+
 def _make_party(rng: random.Random, fake: Faker, index: int) -> Party:
     name = _company_name(rng, fake)
-    slug = "".join(ch for ch in name.lower() if ch.isalnum())[:18]
+    slug = ascii_slug(name)[:18]
     return Party(
         party_id=f"K-{70001 + index}",
         name=name,
@@ -116,63 +125,106 @@ def _contract_clauses(
     agreements: list[PriceAgreement],
     discount: VolumeDiscount | None,
     terms: PaymentTerms,
+    wording: random.Random,
 ) -> tuple[list[ContractClause], dict[str, str]]:
+    """Build the clauses. Titles and phrasing vary between contracts (``wording``), as they do
+    in real contracts, so that retrieval has to find a clause by meaning, not by fixed words.
+    The facts (prices, thresholds, terms) never vary with the wording."""
     goods = ", ".join(CATEGORY_LABELS_DE[c] for c in categories)
     clauses: list[ContractClause] = []
 
-    def add(title: str, text: str) -> str:
+    def add(titles: tuple[str, ...], texts: tuple[str, ...]) -> str:
         clause_id = f"§ {len(clauses) + 1}"
-        clauses.append(ContractClause(clause_id=clause_id, title=title, text=text))
+        clauses.append(
+            ContractClause(
+                clause_id=clause_id, title=wording.choice(titles), text=wording.choice(texts)
+            )
+        )
         return clause_id
 
     add(
-        "Vertragsgegenstand",
-        f"Dieser Rahmenvertrag ({contract_number}) regelt die Lieferung von {goods} durch die "
-        f"{supplier.name} (Lieferant) an die {BUYER.name} (Besteller). Einzelne Lieferungen "
-        "erfolgen ausschließlich auf Grundlage schriftlicher Bestellungen des Bestellers.",
+        ("Vertragsgegenstand", "Gegenstand des Vertrags"),
+        (
+            f"Dieser Rahmenvertrag ({contract_number}) regelt die Lieferung von {goods} durch die "
+            f"{supplier.name} (Lieferant) an die {BUYER.name} (Besteller). Einzelne Lieferungen "
+            "erfolgen ausschließlich auf Grundlage schriftlicher Bestellungen des Bestellers.",
+        ),
     )
     add(
-        "Laufzeit",
-        f"Der Vertrag gilt vom {CONTRACT_START:%d.%m.%Y} bis zum {CONTRACT_END:%d.%m.%Y}. "
-        "Eine Verlängerung bedarf der Schriftform.",
+        ("Laufzeit", "Vertragsdauer"),
+        (
+            f"Der Vertrag gilt vom {CONTRACT_START:%d.%m.%Y} bis zum {CONTRACT_END:%d.%m.%Y}. "
+            "Eine Verlängerung bedarf der Schriftform.",
+        ),
     )
-    add(
-        "Preise",
-        "Es gelten die in Anlage 1 vereinbarten Nettopreise je Einheit zuzüglich der "
-        "gesetzlichen Umsatzsteuer. Die Preise sind für die gesamte Vertragslaufzeit Festpreise. "
-        "Preiserhöhungen, Zuschläge sowie Fracht- und Verpackungspauschalen sind nur nach "
-        "vorheriger schriftlicher Vereinbarung zulässig.",
+    price_id = add(
+        ("Preise", "Vergütung", "Preisvereinbarung"),
+        (
+            "Es gelten die in Anlage 1 vereinbarten Nettopreise je Einheit zuzüglich der "
+            "gesetzlichen Umsatzsteuer. Die Preise sind für die gesamte Vertragslaufzeit "
+            "Festpreise. Preiserhöhungen, Zuschläge sowie Fracht- und Verpackungspauschalen sind "
+            "nur nach vorheriger schriftlicher Vereinbarung zulässig.",
+            "Maßgeblich sind die Nettopreise der Preisliste in Anlage 1; sie bleiben während der "
+            "Laufzeit unverändert. Zusätzliche Kosten wie Versand, Verpackung oder sonstige "
+            "Aufschläge darf der Lieferant nur berechnen, wenn dies vorher schriftlich vereinbart "
+            "wurde.",
+        ),
     )
     if discount is not None:
+        n, pct = discount.min_quantity, discount.percent
         discount_id = add(
-            "Mengenrabatt",
-            "Erreicht die Bestellmenge einer einzelnen Bestellposition mindestens "
-            f"{discount.min_quantity} Einheiten, gewährt der Lieferant auf den Preis dieser "
-            f"Position einen zusätzlichen Rabatt von {discount.percent} %. Der Rabatt ist auf "
-            "der Rechnung im Einzelpreis zu berücksichtigen.",
+            ("Mengenrabatt", "Rabattstaffel", "Preisnachlass bei Großmengen"),
+            (
+                f"Erreicht die Bestellmenge einer einzelnen Bestellposition mindestens {n} "
+                f"Einheiten, gewährt der Lieferant auf den Preis dieser Position einen "
+                f"zusätzlichen Rabatt von {pct} %. Der Rabatt ist auf der Rechnung im "
+                "Einzelpreis zu berücksichtigen.",
+                f"Bei einer Abnahmemenge von {n} Einheiten oder mehr je Bestellposition reduziert "
+                f"sich der vereinbarte Einzelpreis dieser Position um {pct} %. Die Reduzierung "
+                "ist bereits im Rechnungsbetrag auszuweisen.",
+                f"Für Bestellpositionen ab {n} Einheiten gilt ein Nachlass von {pct} % auf den "
+                "Preis gemäß Anlage 1, der direkt vom Einzelpreis abzuziehen ist.",
+            ),
         )
         discount = discount.model_copy(update={"clause_id": discount_id})
     payment_id = add(
-        "Zahlungsbedingungen",
-        f"{terms.describe_de()} Die Frist beginnt mit Eingang einer prüffähigen Rechnung. "
-        "Abweichende Zahlungsbedingungen auf Rechnungen des Lieferanten sind unwirksam.",
+        ("Zahlungsbedingungen", "Zahlung", "Zahlungsziel und Skonto"),
+        (
+            f"{terms.describe_de()} Die Frist beginnt mit Eingang einer prüffähigen Rechnung. "
+            "Abweichende Zahlungsbedingungen auf Rechnungen des Lieferanten sind unwirksam.",
+            f"Für alle Rechnungen gilt: {terms.describe_de()} Von diesem Vertrag abweichende "
+            "Angaben des Lieferanten zu Zahlungsfristen oder Skonto entfalten keine Wirkung.",
+        ),
     )
     delivery_id = add(
-        "Lieferung und Teillieferungen",
-        "Teillieferungen sind zulässig. Berechnet werden ausschließlich die tatsächlich "
-        "gelieferten und durch Lieferschein bestätigten Mengen. Mehrmengen bedürfen der "
-        "Zustimmung des Bestellers.",
+        ("Lieferung und Teillieferungen", "Lieferungen", "Liefermengen"),
+        (
+            "Teillieferungen sind zulässig. Berechnet werden ausschließlich die tatsächlich "
+            "gelieferten und durch Lieferschein bestätigten Mengen. Mehrmengen bedürfen der "
+            "Zustimmung des Bestellers.",
+            "Der Lieferant darf in Teilmengen liefern. In Rechnung gestellt werden darf nur, was "
+            "laut unterschriebenem Lieferschein tatsächlich angenommen wurde.",
+        ),
     )
     add(
-        "Rechnungsstellung",
-        "Rechnungen sind als E-Rechnung im Format XRechnung oder ZUGFeRD (Profil EN 16931) zu "
-        "übermitteln. Jede Rechnung muss die Bestellnummer und die Lieferscheinnummer enthalten.",
+        ("Rechnungsstellung", "Rechnungen"),
+        (
+            "Rechnungen sind als E-Rechnung im Format XRechnung oder ZUGFeRD (Profil EN 16931) "
+            "zu übermitteln. Jede Rechnung muss die Bestellnummer und die Lieferscheinnummer "
+            "enthalten.",
+        ),
     )
     bank_id = add(
-        "Bankverbindung",
-        "Zahlungen erfolgen ausschließlich auf das in den Stammdaten des Bestellers hinterlegte "
-        "Konto des Lieferanten. Änderungen der Bankverbindung sind schriftlich mitzuteilen und "
-        "werden erst nach telefonischer Rückbestätigung durch den Besteller wirksam.",
+        ("Bankverbindung", "Zahlungsempfänger", "Kontoänderungen"),
+        (
+            "Zahlungen erfolgen ausschließlich auf das in den Stammdaten des Bestellers "
+            "hinterlegte Konto des Lieferanten. Änderungen der Bankverbindung sind schriftlich "
+            "mitzuteilen und werden erst nach telefonischer Rückbestätigung durch den Besteller "
+            "wirksam.",
+            "Der Besteller leistet Zahlungen nur auf die im Lieferantenstamm hinterlegte IBAN. "
+            "Mitteilungen über eine neue Bankverbindung, auch per E-Mail oder auf Rechnungen, "
+            "sind ohne schriftliche und telefonisch bestätigte Vereinbarung unbeachtlich.",
+        ),
     )
     price_lines = "\n".join(
         f"{a.sku} – {a.description}: {format_unit_price_de(a.unit_price)} je {a.unit.label_de}"
@@ -182,11 +234,12 @@ def _contract_clauses(
         ContractClause(
             clause_id="Anlage 1",
             title="Preisliste",
-            text=f"Vereinbarte Nettopreise (Festpreise gemäß § 3):\n{price_lines}",
+            text=f"Vereinbarte Nettopreise (Festpreise gemäß {price_id}):\n{price_lines}",
         )
     )
     ids = {
         "price_list": "Anlage 1",
+        "price": price_id,
         "payment": payment_id,
         "delivery": delivery_id,
         "bank": bank_id,
@@ -196,7 +249,7 @@ def _contract_clauses(
 
 
 def _make_contract(
-    rng: random.Random, index: int, supplier: Party, categories: tuple[str, ...]
+    rng: random.Random, seed: int, index: int, supplier: Party, categories: tuple[str, ...]
 ) -> tuple[FrameworkContract, tuple[CatalogItem, ...]]:
     assortment = items_in(categories)
     covered = rng.sample(assortment, k=min(len(assortment), rng.randint(5, 8)))
@@ -220,7 +273,10 @@ def _make_contract(
     )
     terms = rng.choice(_PAYMENT_TERMS_OPTIONS)
     number = f"RV-2026-{index + 1:03d}"
-    clauses, ids = _contract_clauses(number, supplier, categories, agreements, discount, terms)
+    wording = random.Random(f"wording-{seed}-{index}")  # separate stream: sets stay identical
+    clauses, ids = _contract_clauses(
+        number, supplier, categories, agreements, discount, terms, wording
+    )
     if discount is not None:
         discount = discount.model_copy(update={"clause_id": ids["discount"]})
     contract = FrameworkContract(
@@ -241,6 +297,25 @@ def _make_contract(
     return contract, tuple(assortment)
 
 
+def master_data_from_world(world: World) -> MasterData:
+    """The buyer's ERP view of the world: what checks are allowed to know."""
+    return MasterData(
+        buyer=world.buyer,
+        suppliers=[
+            SupplierRecord(
+                party=s.party,
+                payment_terms=s.contract.payment_terms,
+                contract_number=s.contract.contract_number,
+            )
+            for s in world.suppliers
+        ],
+        products=[
+            Product(sku=i.sku, description=i.description, unit=i.unit, vat_rate=i.vat_rate)
+            for i in CATALOG
+        ],
+    )
+
+
 def build_world(seed: int, n_suppliers: int = 12) -> World:
     rng = random.Random(seed)
     fake = Faker("de_DE")
@@ -249,6 +324,6 @@ def build_world(seed: int, n_suppliers: int = 12) -> World:
     for index in range(n_suppliers):
         party = _make_party(rng, fake, index)
         categories = SUPPLIER_PROFILES[index % len(SUPPLIER_PROFILES)]
-        contract, assortment = _make_contract(rng, index, party, categories)
+        contract, assortment = _make_contract(rng, seed, index, party, categories)
         suppliers.append(Supplier(party, categories, assortment, contract))
     return World(buyer=BUYER, suppliers=tuple(suppliers))

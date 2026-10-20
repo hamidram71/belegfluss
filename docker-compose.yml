@@ -1,13 +1,39 @@
-# Local stack. PostgreSQL with pgvector joins in week 3 (RAG over framework contracts).
+# Local stack: the API and PostgreSQL with pgvector for the contract index (ADR 0007).
+# The generated dataset is mounted read-only; create it first with `make data`.
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: belegfluss
+      POSTGRES_PASSWORD: belegfluss
+      POSTGRES_DB: belegfluss
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U belegfluss"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       BELEGFLUSS_ENVIRONMENT: docker
+      BELEGFLUSS_DATABASE_URL: postgresql://belegfluss:belegfluss@postgres:5432/belegfluss
     volumes:
-      - documents:/app/var/documents
+      - ./data:/app/data:ro
+      - documents:/app/var
 
 volumes:
+  pgdata:
   documents:
