@@ -58,14 +58,16 @@ def run_rules(
             )
         )
     else:
-        iban = invoice.seller.iban or ""
-        if iban.replace(" ", "") != (record.party.iban or ""):
+        iban = (invoice.seller.iban or "").replace(" ", "")
+        # Only a *valid* IBAN that differs from master data is the fraud pattern. A missing or
+        # checksum-failing IBAN is almost always a misread (mod-97 catches every single-digit
+        # error) and is reported by the plausibility checks as unreadable instead.
+        if is_valid_iban(iban) and iban != (record.party.iban or ""):
             findings.append(
                 Discrepancy(
                     type=DiscrepancyType.BANK_DETAILS_CHANGED,
                     expected=record.party.iban,
-                    actual=iban or None,
-                    note=None if is_valid_iban(iban) else "IBAN on invoice fails the checksum",
+                    actual=iban,
                 )
             )
         if invoice.payment_terms != record.payment_terms:

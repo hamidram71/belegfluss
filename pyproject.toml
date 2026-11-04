@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "belegfluss"
-version = "0.3.1"
+version = "0.4.0"
 description = "AI agent for three-way matching of invoices, delivery notes, purchase orders and framework contracts (German B2B, E-Rechnung ready)."
 readme = "README.md"
 license = { text = "MIT" }

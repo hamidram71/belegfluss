@@ -48,6 +48,7 @@ class FormatStats:
     documents: int = 0
     failed: int = 0
     exact: int = 0
+    decision_exact: int = 0
     field_hits: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     field_total: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     lines_expected: int = 0
@@ -96,6 +97,38 @@ def _compare_lines(
             stats.field_hits[f"line.{name}"] += getattr(got, name) == getattr(line, name)
 
 
+def decision_relevant(document: Invoice | DeliveryNote) -> dict[str, Any]:
+    """The fields that drive checks and decisions.
+
+    Printed names, addresses and line descriptions are left out on purpose: the supplier is
+    identified through its VAT ID and lines are matched by article number, so a misread
+    street name changes nothing downstream. "Fully correct" still counts every field.
+    """
+    if isinstance(document, Invoice):
+        return {
+            "invoice_number": document.invoice_number,
+            "issue_date": document.issue_date,
+            "due_date": document.due_date,
+            "po_number": document.po_number,
+            "delivery_note_number": document.delivery_note_number,
+            "contract_number": document.contract_number,
+            "seller": (document.seller.party_id, document.seller.vat_id, document.seller.iban),
+            "items": [
+                (i.position, i.sku, i.quantity, i.unit, i.unit_price, i.vat_rate)
+                for i in document.items
+            ],
+            "stated_totals": document.stated_totals,
+            "payment_terms": document.payment_terms,
+        }
+    return {
+        "delivery_note_number": document.delivery_note_number,
+        "delivery_date": document.delivery_date,
+        "po_number": document.po_number,
+        "supplier": document.supplier.party_id,
+        "items": [(i.sku, i.quantity, i.unit) for i in document.items],
+    }
+
+
 def score(
     stats: FormatStats,
     expected: Invoice | DeliveryNote,
@@ -104,6 +137,7 @@ def score(
 ) -> None:
     stats.documents += 1
     stats.exact += expected == actual
+    stats.decision_exact += decision_relevant(expected) == decision_relevant(actual)
     if expected != actual:
         fields = differing_fields(expected, actual)
         shown = ", ".join(fields[:6]) + (f" (+{len(fields) - 6} more)" if len(fields) > 6 else "")
@@ -239,6 +273,10 @@ def to_markdown(results: dict[str, dict[str, FormatStats]]) -> str:
             ("documents", lambda s: str(s.documents)),
             ("failed", lambda s: str(s.failed)),
             ("fully correct documents", lambda s: _pct(s.exact, s.documents)),
+            (
+                "decision-relevant fields correct",
+                lambda s: _pct(s.decision_exact, s.documents),
+            ),
             ("line recall (by SKU)", lambda s: _pct(s.lines_matched, s.lines_expected)),
         ]
         names = sorted({n for s in by_format.values() for n in s.field_total})

@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# Demo image for the Azure deployment: the API plus a generated synthetic dataset (master data,
+# contracts, ERP orders and sample documents), so the hosted app works without any upload of
+# real data. The production image (Dockerfile) contains no data.
+
+FROM python:3.12-slim AS build
+WORKDIR /src
+RUN pip install --no-cache-dir build==1.2.2
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN python -m build --wheel --outdir /dist
+
+# Generate the demo dataset with the generator extras, in a throwaway stage.
+FROM python:3.12-slim AS data
+COPY --from=build /dist/*.whl /tmp/
+RUN pip install --no-cache-dir "$(ls /tmp/*.whl)[synth]"
+ARG DEMO_SETS=40
+RUN belegfluss-synth --sets ${DEMO_SETS} --seed 42 --out /data/synthetic \
+    && rm -rf /data/synthetic/ground_truth   # labels are for evaluation, not for the app
+
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    BELEGFLUSS_STORAGE_DIR=/app/var/documents \
+    BELEGFLUSS_MATCHES_DIR=/app/var/matches
+RUN useradd --create-home --uid 10001 app
+WORKDIR /app
+COPY --from=build /dist/*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl \
+    && mkdir -p /app/var/documents /app/var/matches && chown -R app:app /app
+COPY --from=data --chown=app:app /data /app/data
+USER app
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+CMD ["uvicorn", "belegfluss.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

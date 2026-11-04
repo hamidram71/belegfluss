@@ -117,3 +117,26 @@ def test_unknown_order_and_unknown_match(
     response = harness.client.post("/v1/matches", json=harness.upload(truth))
     assert response.status_code == 422 and "purchase order" in response.text
     assert harness.client.get("/v1/matches/not-a-uuid").status_code == 404
+
+
+def test_misconfiguration_gives_a_clear_503(
+    small_dataset: tuple[Path, Manifest], tmp_path: Path
+) -> None:
+    """Regression: hybrid adjudicator without an LLM produced an opaque 500."""
+    root = small_dataset[0]
+    app = create_app()
+    settings = Settings(
+        storage_dir=tmp_path / "documents",
+        matches_dir=tmp_path / "matches",
+        master_data_dir=root / "master_data",
+        contracts_dir=root / "contracts",
+        erp_orders_dir=root / "sets",
+        adjudicator="hybrid",
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_llm] = lambda: None
+    client = TestClient(app)
+    response = client.post(
+        "/v1/matches", json={"invoice_document_id": "x", "delivery_note_document_id": "y"}
+    )
+    assert response.status_code == 503 and "needs a configured LLM" in response.text

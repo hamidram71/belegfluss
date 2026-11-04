@@ -10,6 +10,7 @@ from belegfluss.evaluation.cli import main
 from belegfluss.extraction.pipeline import extract_invoice
 from belegfluss.master_data import MasterData
 from belegfluss.synth.ground_truth import Manifest
+from belegfluss.synth.world import World
 
 
 def test_extraction_eval_on_e_invoices_is_perfect(
@@ -78,3 +79,22 @@ def test_cache_is_ignored_when_the_document_changed(tmp_path: Path) -> None:
     # Entries written before hashes were stored are treated as stale.
     _cache_path(cache, "SET-0002", DocumentKind.INVOICE).write_text(json.dumps({"document": {}}))
     assert load_cached(cache, "SET-0002", DocumentKind.INVOICE, b"original") is None
+
+
+def test_decision_relevant_ignores_printed_names_but_not_ibans(world: World) -> None:
+    import random
+
+    from belegfluss.evaluation.extraction_eval import FormatStats, score
+    from belegfluss.synth.scenarios import generate_set
+
+    invoice = generate_set(random.Random(3), world, 1).invoice
+    renamed = invoice.model_copy(
+        update={"seller": invoice.seller.model_copy(update={"name": "Misread GmbH"})}
+    )
+    other_iban = invoice.model_copy(
+        update={"seller": invoice.seller.model_copy(update={"iban": "DE89370400440532013000"})}
+    )
+    stats = FormatStats()
+    score(stats, invoice, renamed)
+    score(stats, invoice, other_iban)
+    assert (stats.exact, stats.decision_exact) == (0, 1)

@@ -11,6 +11,7 @@ from typing import Any
 
 from belegfluss.agent.adjudicator import Adjudicator, DeterministicAdjudicator, LLMAdjudicator
 from belegfluss.agent.graph import build_match_graph
+from belegfluss.agent.hybrid import HybridAdjudicator
 from belegfluss.config import Settings
 from belegfluss.contracts.embeddings import Embedder, HashingEmbedder, OpenAIEmbedder
 from belegfluss.contracts.retrieval import ContractRetriever
@@ -56,11 +57,14 @@ def optional_llm(settings: Settings) -> StructuredLLM | None:
 
 
 def create_adjudicator(settings: Settings, llm: StructuredLLM | None) -> Adjudicator:
-    if settings.adjudicator == "deterministic" or (settings.adjudicator == "auto" and not llm):
+    choice = settings.adjudicator
+    if choice == "deterministic" or (choice == "auto" and not llm):
         return DeterministicAdjudicator()
     if llm is None:
-        raise LLMNotConfiguredError("BELEGFLUSS_ADJUDICATOR=llm needs a configured LLM")
-    return LLMAdjudicator(llm)
+        raise LLMNotConfiguredError(f"BELEGFLUSS_ADJUDICATOR={choice} needs a configured LLM")
+    if choice == "llm":
+        return LLMAdjudicator(llm)
+    return HybridAdjudicator(LLMAdjudicator(llm))
 
 
 def create_match_graph(

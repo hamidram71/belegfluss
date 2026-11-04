@@ -39,7 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     ag = sub.add_parser("agent", help="category and clause accuracy of the matching agent")
     ag.add_argument("--data", type=Path, default=Path("data/synthetic"))
     ag.add_argument("--source", choices=["ground-truth", "extracted"], default="ground-truth")
-    ag.add_argument("--adjudicator", choices=["deterministic", "llm"], default="deterministic")
+    ag.add_argument(
+        "--adjudicator", choices=["deterministic", "hybrid", "llm"], default="deterministic"
+    )
     ag.add_argument(
         "--embedder",
         choices=["hashing", "openai"],
@@ -110,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         master = MasterData.load(args.data / "master_data")
-        llm = create_llm(settings) if args.adjudicator == "llm" else None
+        llm = create_llm(settings) if args.adjudicator in ("llm", "hybrid") else None
         graph, retriever = create_match_graph(settings, master, llm)
         agent_report = agent_eval.run_agent_eval(
             args.data, graph, args.source, args.cache, args.limit

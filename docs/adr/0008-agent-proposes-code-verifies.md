@@ -44,3 +44,21 @@ and in accounts payable a confident wrong answer leads to wrong payments.
 - On synthetic data the deterministic baseline is already at 100 %. That is an upper bound
   (it reads the generator's own wording); the LLM adjudicator's value has to show on varied
   real contracts, which synthetic data can only approximate.
+
+## Update 2026-11-04: measured, and why the default is now hybrid
+
+`belegfluss-eval agent` compared the adjudicators on 200 sets (generator 0.3.1, `gpt-6-luna`):
+
+- Both reached 100 % on finding categories and 200 / 200 correct decisions.
+- The deterministic baseline cited the labelled clause in 100 % of cases; the LLM in 100 %
+  except `item_not_ordered` (85 % on ground-truth documents, 77 % on extracted ones). Every
+  LLM citation passed verification: no invented clause, no fabricated quote. The differences
+  were judgement calls (citing the delivery clause for an unordered article), traced to an
+  ambiguous instruction, which has since been made explicit.
+
+On this data the model adds no accuracy over the rules. The default adjudicator is therefore
+**hybrid**: the deterministic proposal is used whenever the rules can decide and the proposal
+passes verification; the LLM is asked only about the rest (for example, a price list it
+cannot parse). On the 200 synthetic sets the hybrid adjudicator decides all 200 correctly
+with zero model calls. Its value over pure rules has to show on real contracts with formats
+the rules do not understand.

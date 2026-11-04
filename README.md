@@ -2,13 +2,14 @@
 
 **An AI agent (in development) that reconciles supplier invoices with purchase orders, delivery notes and framework contracts, and only escalates what a human really needs to look at.**
 
-[![CI](https://github.com/hamidram71/belegfluss/actions/workflows/ci.yml/badge.svg)](https://github.com/hamidram71/belegfluss/actions/workflows/ci.yml)
+[![CI](https://github.com/hamidram71/belegfluss/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-github-user>/belegfluss/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%20%7C%203.15-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> Status: **delivery 3 of 4**. Extraction, rule-based checks, contract retrieval (RAG), the
-> matching agent, a human review queue, prompt-injection defences and a read-only MCP server
-> work and are evaluated. Next: deployment on Azure, tracing and a demo (see [Roadmap](#roadmap)).
+> Status: **delivery 4 of 4 in progress**. Extraction, rule-based checks, contract retrieval
+> (RAG), the matching agent, a human review queue, prompt-injection defences, a read-only MCP
+> server and an Azure deployment work and are evaluated with a real model. Next: tracing,
+> a small review UI and a demo (see [Roadmap](#roadmap)).
 
 ## Why
 
@@ -49,41 +50,40 @@ Design principles, each with an architecture decision record:
 
 - **XML first.** Structured e-invoices never reach a model ([ADR 0001](docs/adr/0001-xml-first.md), [0005](docs/adr/0005-hardened-deterministic-cii-parser.md)).
 - **The LLM transcribes, code decides.** The model returns values exactly as printed; parsing and every check are code ([ADR 0006](docs/adr/0006-llm-transcribes-code-decides.md)).
-- **The model proposes, code verifies.** A finding's category and contract citation count only if the clause was retrieved, the quote is verbatim and the numbers agree ([ADR 0008](docs/adr/0008-agent-proposes-code-verifies.md)).
+- **The model proposes, code verifies, and is asked only when needed.** A finding's category and contract citation count only if the clause was retrieved, the quote is verbatim and the numbers agree. Measured against a rule-based baseline, the model added no accuracy on this data, so the default is hybrid: rules first, the model only where rules cannot decide ([ADR 0008](docs/adr/0008-agent-proposes-code-verifies.md)).
 - **Documents are untrusted.** Layered defences against prompt injection; a model can never approve an invoice ([ADR 0009](docs/adr/0009-documents-are-untrusted.md)).
 - **Measured, not demoed.** Every layer is evaluated against labelled ground truth, including false alarms.
 
 ## Results
 
-All results come from `belegfluss-eval` on 200 synthetic sets (seed 42); the generator version
-is stated, because a fix in delivery 3 changed a few labels.
+Measured with `belegfluss-eval` on 200 synthetic sets (seed 42, generator 0.3.1) with
+`gpt-6-luna` and `text-embedding-3-small`.
 
-| What | Result | Setup |
-| --- | --- | --- |
-| E-invoice extraction (XRechnung, ZUGFeRD) | 128 / 128 fully correct, 0 model calls | generator 0.2 |
-| LLM extraction, digital PDFs | 174 / 174 fully correct | `gpt-6-luna`, generator 0.2 |
-| LLM extraction, scans | 93 / 98 fully correct (94.9 %), 1 failure | `gpt-6-luna`, generator 0.2 |
-| Rules end to end on extracted documents | all 102 discrepancies found, 0 false alarms on 120 clean sets | `gpt-6-luna`, generator 0.2 |
-| Matching agent, deterministic adjudicator | 100 % category and clause correct for every type; 200 / 200 decisions correct | generator 0.3, offline embedder |
-| Contract retrieval | labelled clause among the candidates for 100 % of findings | generator 0.3, offline embedder |
-| Plausibility checks | 0 false flags on 200 correct sets | generator 0.3 |
-| Prompt-injection screening | 75 / 75 planted attacks flagged; 0 false flags on 134 clean PDFs | generator 0.3 |
-| LLM adjudicator, OpenAI embeddings, LLM under attack | *not yet measured* | run `make eval-agent-llm`, `make eval-injection-llm` |
+| What | Result |
+| --- | --- |
+| E-invoice extraction (XRechnung, ZUGFeRD) | 131 / 131 fully correct, no model calls |
+| LLM extraction, digital PDFs | 173 / 173 fully correct |
+| LLM extraction, scans | 89 / 96 fully correct; 94 / 96 correct in every decision-relevant field |
+| Rules end to end on extracted documents | all 102 discrepancies found; 200 / 200 decisions correct |
+| Matching agent, LLM adjudicator | 100 % categories; clauses 100 % except `item_not_ordered` (77-85 %); 0 invented clauses or quotes |
+| Matching agent, rule-based and hybrid adjudicators | 100 % categories and clauses; hybrid needed 0 model calls |
+| Prompt injection (60-set attack test set) | 46 / 46 attacks flagged, 0 false flags on 20 clean PDFs; 0 of 38 attacked documents read by the model changed what it extracted |
+| Cost | about 458k input and 162k output tokens for 269 LLM-read documents; adjudication 68k / 17k tokens for 78 sets |
 
 How to read this honestly:
 
-- **All errors were on scans**: a misread order number, invoice number and invoice date,
-  differences in fields the report did not break out yet (it lists them per document since
-  delivery 3), and one failure on a missing unit (now filled from master data with a
-  warning). The plausibility checks added in delivery 3 catch misread order numbers and
-  dates; a misread invoice number stays undetectable.
-- **The rules scored 100 % despite those misreads** because the misread fields are not used by
-  the rules, and the evaluation links documents through the ground truth. In production these
-  fields link documents and set payment deadlines; that is why the plausibility checks exist.
-- **Generator and checks share one author.** The 100 % results for the deterministic baseline,
-  retrieval and screening are upper bounds on synthetic data, not claims about real documents.
-- Cost of the LLM extraction run: about 415k input and 152k output tokens for 272 documents,
-  roughly 0.05 cents per document at the prices published for `gpt-6-luna`; 7-12 s per call.
+- **Every extraction error was on a scan.** Five of the seven imperfect scans differ only in a
+  printed supplier name or street, which no decision uses (suppliers are identified by VAT ID).
+  The two that mattered: a misread invoice date, caught by the plausibility checks, and a
+  misread IBAN, which the rules first reported as "bank details changed". It is now reported
+  as unreadable, because a checksum-failing IBAN is a misread, not a fraud signal.
+- **The LLM did not beat the rules.** That is a finding, not a failure: it is why the default
+  adjudicator became hybrid. The LLM's remaining differences were judgement calls traced to
+  an ambiguous instruction, since clarified.
+- **Synthetic data, one author.** Generator, rules and attack phrases share an author, so 100 %
+  figures are upper bounds, not claims about real documents. The evaluation links documents
+  through the ground truth, so linking errors in production (a misread order number) are only
+  covered by the plausibility checks.
 
 ## The synthetic dataset
 
@@ -125,7 +125,9 @@ hidden text or a visible remark; the business data stays identical.
 
 ## Quickstart
 
-Requires Python 3.12 or newer (CI tests 3.12 and 3.15) and Docker for PostgreSQL.
+Requires Python 3.12 or newer and Docker for PostgreSQL. CI tests 3.12, 3.14 and 3.15 on Linux
+and 3.14 on Windows. On Windows use Python 3.14 for now: two indirect dependencies (zstandard,
+PyYAML) publish no Windows wheels for 3.15 yet, and building them needs a C++ compiler.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
@@ -175,6 +177,13 @@ explanation and whether the citation was verified, plus any plausibility or secu
 }
 ```
 
+### Deployment on Azure
+
+`infra/main.bicep` deploys the API to Azure Container Apps (scales to zero) with PostgreSQL
+Flexible Server and pgvector, sized for an Azure free account; `infra/deploy.ps1` runs it.
+Decisions and trade-offs: [ADR 0010](docs/adr/0010-azure-free-account-deployment.md); steps:
+[infra/README.md](infra/README.md).
+
 ### Evaluation
 
 ```bash
@@ -184,6 +193,7 @@ make eval-agent           # agent with the deterministic adjudicator            
 make data-adversarial && make eval-injection   # screening on the attack test set   (free)
 make eval-llm             # LLM extraction of 20 sets, then rules end to end       (API)
 make eval-agent-llm       # LLM adjudicator + OpenAI embeddings                    (API)
+belegfluss-eval agent --data data/synthetic --adjudicator hybrid --embedder openai
 make eval-injection-llm   # does an attack change what the LLM extracts?           (API)
 ```
 
@@ -221,13 +231,34 @@ docs/adr/        architecture decision records
 - [ADR 0007 – Contract retrieval: clause chunks, fixed queries, exact search](docs/adr/0007-contract-retrieval.md)
 - [ADR 0008 – The matching agent: the model proposes, code verifies](docs/adr/0008-agent-proposes-code-verifies.md)
 - [ADR 0009 – Documents are untrusted: layered defences against prompt injection](docs/adr/0009-documents-are-untrusted.md)
+- [ADR 0010 – Deployment on an Azure free account](docs/adr/0010-azure-free-account-deployment.md)
+
+## Related work
+
+Three-way matching is an established product category and a popular portfolio topic.
+Commercial tools include SAP's own invoice verification, Candis (three-way match with SAP
+Business One, Microsoft Business Central and Sage) and xSuite with Hypatos for SAP. Open-source
+projects include [InvoiceFlow](https://github.com/StephaneWamba/InvoiceFlow),
+[invoice-match-mcp](https://github.com/Pawel-BoOssko/invoice-match-mcp),
+[ap-agent](https://github.com/normanqvq/ap-agent), [Ledgic](https://github.com/miu33-arch/ledgic)
+and [invoice-agent-ai](https://github.com/SaidIbenariba/invoice-agent-ai); several share the
+principle that code, not the model, decides.
+
+Where Belegfluss puts its weight:
+
+- **German e-invoicing in depth**: XRechnung and ZUGFeRD parsed deterministically along
+  EN 16931, German documents and scans, framework contracts with varied wording.
+- **Measurement at scale, with a real model**: 200 labelled sets, results per input format,
+  cost per document, false-alarm rates next to detection rates.
+- **A negative result acted upon**: the LLM adjudicator was measured against a rule-based
+  baseline, did not beat it, and the design changed accordingly.
 
 ## Roadmap
 
 - [x] **Delivery 1** – Repo, CI, domain model, synthetic dataset generator, intake API
 - [x] **Delivery 2** – E-invoice parsing, LLM extraction for PDFs and scans, rule-based checks, evaluation harness
 - [x] **Delivery 3** – RAG over contracts (pgvector), LangGraph matching agent with verified citations, plausibility checks, review queue, prompt-injection test set and screening, PII masking, read-only MCP server
-- [ ] **Delivery 4** – Deployment on Azure Container Apps with Azure OpenAI, tracing with Langfuse, demo
+- [ ] **Delivery 4** – Fixes from the full evaluation (IBAN misreads, decision-relevant metric, hybrid adjudicator), deployment on Azure (done); tracing, review UI, demo (next)
 
 ## Known limitations
 
@@ -239,8 +270,8 @@ docs/adr/        architecture decision records
   byte-identical between runs (their content is).
 - Prompt-injection screening is pattern-based; paraphrased visible attacks can pass it, which
   is why the model has no authority over decisions.
-- The LLM adjudicator, OpenAI embeddings and the model's robustness under attack have not been
-  measured yet (see Results).
+- The hosted demo uses the OpenAI API rather than Azure OpenAI, because free-trial
+  subscriptions get no Azure OpenAI quota; switching is a configuration change.
 
 ## License
 

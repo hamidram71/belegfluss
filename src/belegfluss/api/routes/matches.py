@@ -43,7 +43,8 @@ def get_match_graph(
     if key not in _graphs:
         try:
             _graphs[key], _ = create_match_graph(settings, master, llm)
-        except VectorStoreUnavailableError as exc:
+        except (VectorStoreUnavailableError, LLMNotConfiguredError) as exc:
+            # Configuration problems get a clear 503 with what to fix, never an opaque 500.
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     return _graphs[key]
 

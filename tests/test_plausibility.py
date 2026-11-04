@@ -67,3 +67,20 @@ def test_extraction_warnings_become_issues(world: World) -> None:
         g.invoice, g.delivery_note, {g.purchase_order.po_number}, warnings=["line 2: unit missing"]
     )
     assert [i.code for i in issues] == [IssueCode.EXTRACTION_WARNING]
+
+
+def test_misread_iban_is_unreadable_not_fraud(world: World, master: object) -> None:
+    """Regression from the first full LLM run: a misread IBAN on a scan was reported as
+    'bank details changed'. One wrong digit always fails the mod-97 checksum."""
+    from belegfluss.checks.rules import run_rules
+    from belegfluss.domain.discrepancies import DiscrepancyType
+
+    g = _sets(world)[5]
+    iban = g.invoice.seller.iban or ""
+    wrong_digit = "1" if iban[-1] != "1" else "2"
+    misread = g.invoice.seller.model_copy(update={"iban": iban[:-1] + wrong_digit})
+    invoice = g.invoice.model_copy(update={"seller": misread})
+    findings = run_rules(invoice, g.purchase_order, g.delivery_note, master)  # type: ignore[arg-type]
+    assert DiscrepancyType.BANK_DETAILS_CHANGED not in {f.type for f in findings}
+    codes = {i.code for i in check_plausibility(invoice, g.delivery_note, {invoice.po_number})}
+    assert IssueCode.IBAN_UNREADABLE in codes

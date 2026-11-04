@@ -27,8 +27,9 @@ class Settings(BaseSettings):
     # No model means the offline hashing embedder: a lexical baseline, no API calls.
     embedding_model: str | None = None
     embedding_dimensions: int = 512
-    # "auto": the LLM adjudicator if an LLM is configured, otherwise the deterministic one.
-    adjudicator: Literal["auto", "llm", "deterministic"] = "auto"
+    # "auto": hybrid (rules first, LLM only where rules cannot decide) if an LLM is
+    # configured, otherwise deterministic. "llm" asks the model about every finding.
+    adjudicator: Literal["auto", "hybrid", "llm", "deterministic"] = "auto"
 
     # LLM, used only for documents without structured data (ADR 0001, ADR 0005).
     # No default model on purpose: model ids change; the operator chooses one explicitly.

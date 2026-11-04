@@ -191,3 +191,34 @@ def test_mask_text() -> None:
     masked = mask_text("IBAN DE89 3704 0044 0532 0130 00, rechnung@firma.example, +49 711 123456")
     assert "0532" not in masked and "DE** **** 3000" in masked
     assert "[email]" in masked and "[phone]" in masked
+
+
+def test_hybrid_asks_the_model_only_when_rules_cannot_decide(
+    world: World, master: MasterData, retriever: ContractRetriever
+) -> None:
+    from belegfluss.agent.adjudicator import FindingContext
+    from belegfluss.agent.hybrid import HybridAdjudicator
+
+    # Rules can decide: same result as the baseline, no model call.
+    llm = ScriptedLLM([])
+    g = _set_with(world, DiscrepancyType.VOLUME_DISCOUNT_MISSING)
+    result = _run(world, master, retriever, g, HybridAdjudicator(LLMAdjudicator(llm)))
+    assert llm.prompts == [] and result.findings[0].verified
+    assert result.findings[0].type is DiscrepancyType.VOLUME_DISCOUNT_MISSING
+
+    # Price-list row not retrieved: only this finding goes to the model.
+    g = _set_with(world, DiscrepancyType.PRICE_ABOVE_CONTRACT)
+    finding = g.discrepancies[0].model_copy(update={"clause_id": None})
+    contract = g.supplier.contract.contract_number
+    evidence = [h for h in retriever.evidence(contract, finding) if h.chunk.clause_id != "Anlage 1"]
+    ctx = FindingContext(finding_id="F1", finding=finding, evidence=evidence)
+    answer = FindingJudgement(
+        finding_id="F1",
+        category="price_above_contract",
+        clause_id=None,
+        quote=None,
+        explanation_de="x",
+    )
+    llm = ScriptedLLM([answer])
+    judgements, _ = HybridAdjudicator(LLMAdjudicator(llm)).adjudicate([ctx])
+    assert len(llm.prompts) == 1 and judgements["F1"] == answer

@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import timedelta
 from enum import StrEnum
 
+from belegfluss.domain.identifiers import is_valid_iban
 from belegfluss.domain.models import DeliveryNote, Invoice, Model
 
 
@@ -24,6 +25,7 @@ class IssueCode(StrEnum):
     DUPLICATE_INVOICE = "duplicate_invoice"
     EXTRACTION_WARNING = "extraction_warning"
     SUSPICIOUS_CONTENT = "suspicious_content"
+    IBAN_UNREADABLE = "iban_unreadable"
 
 
 class PlausibilityIssue(Model):
@@ -60,6 +62,12 @@ def check_plausibility(
             IssueCode.DELIVERY_NOTE_MISMATCH,
             f"invoice cites delivery note {invoice.delivery_note_number!r}, "
             f"document is {delivery.delivery_note_number!r}",
+        )
+    if not is_valid_iban(invoice.seller.iban or ""):
+        add(
+            IssueCode.IBAN_UNREADABLE,
+            f"IBAN {invoice.seller.iban!r} is missing or fails the checksum; probably misread. "
+            "Payment must use the supplier master record.",
         )
     expected_due = invoice.issue_date + timedelta(days=invoice.payment_terms.net_days)
     if invoice.due_date != expected_due:
