@@ -46,3 +46,7 @@ finding, so the system must find and cite it.
   phrasings. Real contracts need measurement with real documents.
 - Found while building this: approximate-index filtering and tie ordering both made pgvector
   and the in-memory store disagree. The parity test now guards against both.
+- Found later in CI: ties were broken by `chunk_id` in the database's collation. A local test
+  database used byte order ("C") and passed; CI and Azure use `en_US.utf8`, which sorts
+  `§ 1` before `Anlage 1`. The tie-breaker now uses `COLLATE "C"`, identical to Python's
+  ordering on every server.

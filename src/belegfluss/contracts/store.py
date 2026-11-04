@@ -145,7 +145,9 @@ class PgVectorStore:
                 WHERE contract_number = %(contract)s
                 ORDER BY keyword_hit DESC,
                          round((1 - (embedding <=> %(q)s))::numeric, 6) DESC,
-                         chunk_id
+                         -- Byte order, as in Python: a language collation such as en_US
+                         -- sorts '§ 1' before 'Anlage 1' and would break ties differently.
+                         chunk_id COLLATE "C"
                 LIMIT %(k)s""",
             {"q": query, "kw": keyword, "contract": contract_number, "k": k},
         ).fetchall()
