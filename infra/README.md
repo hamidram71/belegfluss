@@ -23,7 +23,9 @@ group `belegfluss-rg` and deploys `main.bicep` (5-10 minutes). It prints the API
 open `<address>/docs`. On the first match request the app builds the contract index in
 PostgreSQL (a few cents of embeddings).
 
-If PostgreSQL is not allowed in the region, add `-Location westeurope` (or `swedencentral`).
+The script first checks that PostgreSQL B1ms (version 16) is available to the subscription in
+the region; free-trial subscriptions are restricted in some regions. The default is
+`northeurope`; choose another with `-Location westeurope` (or `swedencentral`).
 
 ## Update after a code change
 
@@ -34,6 +36,24 @@ Push to `main`; after the new image is published, deploy it by its commit SHA. (
 $sha = git rev-parse HEAD
 az containerapp update -g belegfluss-rg -n belegfluss-api --image ghcr.io/<github-user>/belegfluss-demo:$sha
 ```
+
+## Watch matches in the logs
+
+Every match writes one JSON line (decision, findings, duration per step, tokens, estimated
+cost). In the Azure portal: Log Analytics workspace `belegfluss-logs`, *Logs*:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where Log_s has '"event": "match"'
+| extend m = parse_json(substring(Log_s, indexof(Log_s, "{")))
+| project TimeGenerated, decision = tostring(m.decision), findings = m.findings,
+          duration_ms = toint(m.duration_ms), tokens_in = toint(m.input_tokens)
+| order by TimeGenerated desc
+```
+
+To show an estimated cost per match, pass current prices (USD per million tokens) from the
+provider's pricing page when deploying:
+`az deployment group create ... --parameters llmInputUsdPerMtok=<in> llmOutputUsdPerMtok=<out>`.
 
 ## Remove everything
 

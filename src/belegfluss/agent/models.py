@@ -42,9 +42,20 @@ class ReviewFinding(Model):
     verification_note: str | None = None
 
 
+class TraceStep(Model):
+    """One step of a match: what ran, how long it took, what the model used."""
+
+    step: str
+    duration_ms: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    detail: str | None = None
+
+
 class MatchResult(Model):
     invoice_number: str
     supplier_id: str
+    supplier_name: str | None = None
     po_number: str
     decision: Decision
     findings: list[ReviewFinding]
@@ -52,3 +63,6 @@ class MatchResult(Model):
     adjudicator: str
     llm_input_tokens: int = 0
     llm_output_tokens: int = 0
+    trace: list[TraceStep] = Field(default_factory=list)
+    duration_ms: int = 0
+    estimated_cost_usd: float | None = None

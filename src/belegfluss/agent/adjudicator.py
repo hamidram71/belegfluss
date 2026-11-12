@@ -18,6 +18,7 @@ from belegfluss.agent.models import Adjudication, FindingJudgement
 from belegfluss.contracts.store import ScoredChunk
 from belegfluss.domain.discrepancies import Discrepancy, DiscrepancyType
 from belegfluss.domain.models import Model
+from belegfluss.domain.money import format_decimal_de, format_unit_price_de
 from belegfluss.extraction.llm import LLMUsage, StructuredLLM
 from belegfluss.security.pii import mask_text
 
@@ -59,9 +60,41 @@ def list_price(evidence: list[ScoredChunk], sku: str | None) -> Decimal | None:
     return None
 
 
-def _first_sentence(text: str) -> str:
+# Words that mark the sentence carrying the evidence for each finding type. Quoting the first
+# sentence of a clause is not enough: in the delivery clause it is "Teillieferungen sind
+# zulässig", which argues *for* the supplier (found while reviewing the UI).
+_EVIDENCE_WORDS: dict[DiscrepancyType, tuple[str, ...]] = {
+    DiscrepancyType.QUANTITY_EXCEEDS_DELIVERY: (
+        "berechnet",
+        "geliefert",
+        "lieferschein",
+        "rechnung gestellt",
+        "angenommen",
+        "mengen",
+    ),
+    DiscrepancyType.ITEM_NOT_ORDERED: (
+        "zuschläge",
+        "aufschläge",
+        "fracht",
+        "verpackung",
+        "versand",
+        "zusätzliche kosten",
+    ),
+    DiscrepancyType.PAYMENT_TERMS_DEVIATION: ("zahlbar", "skonto", "tagen", "zahlungsfrist"),
+    DiscrepancyType.BANK_DETAILS_CHANGED: ("konto", "iban", "bankverbindung"),
+    DiscrepancyType.VOLUME_DISCOUNT_MISSING: ("rabatt", "nachlass", "einheiten", "reduziert"),
+}
+
+
+def evidence_sentence(text: str, kind: DiscrepancyType) -> str:
+    """The sentence of a clause that best supports a finding of ``kind``."""
     body = text.split(": ", 1)[-1]
-    return re.split(r"(?<=[.])\s", body, maxsplit=1)[0]
+    sentences = [s.strip() for s in re.split(r"(?<=[.])\s+", body) if s.strip()]
+    if not sentences:
+        return body
+    words = _EVIDENCE_WORDS.get(kind, ())
+    scores = [sum(word in sentence.lower() for word in words) for sentence in sentences]
+    return sentences[scores.index(max(scores))]
 
 
 class Adjudicator(Protocol):
@@ -105,7 +138,7 @@ class DeterministicAdjudicator:
                 _SURCHARGE.search(f"{f.sku or ''} {f.note or ''}")
             )
             if hit is not None and (category in CONTRACT_BASED or surcharge):
-                clause, quote = hit.chunk.clause_id, _first_sentence(hit.chunk.text)
+                clause, quote = hit.chunk.clause_id, evidence_sentence(hit.chunk.text, category)
             out[ctx.finding_id] = FindingJudgement(
                 finding_id=ctx.finding_id,
                 category=category.value,
@@ -116,20 +149,47 @@ class DeterministicAdjudicator:
         return out, LLMUsage()
 
 
+def _money(value: str | None) -> str:
+    """'17.20' -> '17,20 €' (German format); non-numbers are returned unchanged."""
+    try:
+        return format_unit_price_de(Decimal(value or ""))
+    except InvalidOperation:
+        return value or "?"
+
+
+def _number(value: str | None) -> str:
+    try:
+        return format_decimal_de(Decimal(value or ""))
+    except InvalidOperation:
+        return value or "?"
+
+
 def _template_de(kind: DiscrepancyType, f: Discrepancy, clause: str | None) -> str:
+    """Reviewer-facing explanation in German, with German number formatting."""
     ref = f" ({clause})" if clause else ""
+    pos = f"Position {f.position}: " if f.position else ""
     texts = {
         DiscrepancyType.PRICE_ABOVE_CONTRACT: (
-            f"Position {f.position}: Einzelpreis {f.actual} € liegt über dem vereinbarten "
-            f"Preis {f.expected} €{ref}."
+            f"{pos}Einzelpreis {_money(f.actual)} liegt über dem vereinbarten Preis "
+            f"{_money(f.expected)}{ref}."
         ),
         DiscrepancyType.VOLUME_DISCOUNT_MISSING: (
-            f"Position {f.position}: Der vertragliche Mengenrabatt{ref} wurde nicht "
-            f"berücksichtigt; berechnet {f.actual} € statt {f.expected} €."
+            f"{pos}Der vertragliche Mengenrabatt{ref} wurde nicht berücksichtigt; berechnet "
+            f"{_money(f.actual)} statt {_money(f.expected)}."
         ),
         DiscrepancyType.QUANTITY_EXCEEDS_DELIVERY: (
-            f"Position {f.position}: berechnet {f.actual}, laut Lieferschein geliefert "
-            f"{f.expected}{ref}."
+            f"{pos}Berechnet {_number(f.actual)}, laut Lieferschein geliefert "
+            f"{_number(f.expected)}{ref}."
+        ),
+        DiscrepancyType.ITEM_NOT_ORDERED: (
+            f"{pos}Artikel {f.sku or '?'} ({f.actual or '?'}) ist nicht Teil der Bestellung{ref}."
+        ),
+        DiscrepancyType.WRONG_VAT_RATE: (
+            f"{pos}USt-Satz {_number(f.actual)} % statt {_number(f.expected)} %."
+        ),
+        DiscrepancyType.TOTALS_INCONSISTENT: (
+            f"Rechnungssummen rechnerisch nicht schlüssig: ausgewiesen {_money(f.actual)}, "
+            f"berechnet {_money(f.expected)}."
         ),
         DiscrepancyType.PAYMENT_TERMS_DEVIATION: (
             f"Zahlungsbedingungen der Rechnung weichen vom Vertrag ab{ref}."
@@ -139,7 +199,7 @@ def _template_de(kind: DiscrepancyType, f: Discrepancy, clause: str | None) -> s
             "verifizieren."
         ),
     }
-    return texts.get(kind, f"{kind.value}: erwartet {f.expected}, berechnet {f.actual}.")
+    return texts[kind]
 
 
 INSTRUCTIONS = """You assist accounts payable in checking German supplier invoices.

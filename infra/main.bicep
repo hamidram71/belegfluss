@@ -10,7 +10,7 @@
 
 targetScope = 'resourceGroup'
 
-@description('Azure region. Free-trial subscriptions sometimes restrict PostgreSQL in a region; try westeurope or swedencentral if germanywestcentral fails.')
+@description('Azure region. Free-trial subscriptions restrict PostgreSQL in some regions; deploy.ps1 checks availability first.')
 param location string = resourceGroup().location
 
 @description('Short lowercase prefix for resource names.')
@@ -30,6 +30,12 @@ param llmModel string = 'gpt-6-luna'
 
 @description('Embedding model for the contract index.')
 param embeddingModel string = 'text-embedding-3-small'
+
+@description('Optional: USD per million input tokens, to show an estimated cost per match. Empty = no estimate.')
+param llmInputUsdPerMtok string = ''
+
+@description('Optional: USD per million output tokens.')
+param llmOutputUsdPerMtok string = ''
 
 @description('PostgreSQL administrator login (not admin, root, postgres ...).')
 param postgresAdminLogin string = 'belegflussadmin'
@@ -186,7 +192,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'api'
           image: image
           resources: { cpu: json('0.5'), memory: '1Gi' }
-          env: [
+          env: concat([
             { name: 'BELEGFLUSS_ENVIRONMENT', value: 'azure' }
             { name: 'BELEGFLUSS_STORAGE_DIR', value: '/app/var/documents' }
             { name: 'BELEGFLUSS_MATCHES_DIR', value: '/app/var/matches' }
@@ -196,7 +202,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'BELEGFLUSS_ADJUDICATOR', value: 'hybrid' }
             { name: 'OPENAI_API_KEY', secretRef: 'openai-api-key' }
             { name: 'BELEGFLUSS_DATABASE_URL', secretRef: 'database-url' }
-          ]
+          ], empty(llmInputUsdPerMtok) || empty(llmOutputUsdPerMtok) ? [] : [
+            { name: 'BELEGFLUSS_LLM_INPUT_USD_PER_MTOK', value: llmInputUsdPerMtok }
+            { name: 'BELEGFLUSS_LLM_OUTPUT_USD_PER_MTOK', value: llmOutputUsdPerMtok }
+          ])
           volumeMounts: [{ volumeName: 'var', mountPath: '/app/var' }]
           probes: [
             {

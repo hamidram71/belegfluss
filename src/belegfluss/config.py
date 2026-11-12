@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # No model means the offline hashing embedder: a lexical baseline, no API calls.
     embedding_model: str | None = None
     embedding_dimensions: int = 512
+    # Optional prices (USD per million tokens) to estimate the cost of each match. Left empty
+    # on purpose: prices change, and a wrong default would be worse than no estimate.
+    llm_input_usd_per_mtok: float | None = None
+    llm_output_usd_per_mtok: float | None = None
+
     # "auto": hybrid (rules first, LLM only where rules cannot decide) if an LLM is
     # configured, otherwise deterministic. "llm" asks the model about every finding.
     adjudicator: Literal["auto", "hybrid", "llm", "deterministic"] = "auto"

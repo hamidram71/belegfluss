@@ -222,3 +222,55 @@ def test_hybrid_asks_the_model_only_when_rules_cannot_decide(
     llm = ScriptedLLM([answer])
     judgements, _ = HybridAdjudicator(LLMAdjudicator(llm)).adjudicate([ctx])
     assert len(llm.prompts) == 1 and judgements["F1"] == answer
+
+
+def test_explanations_use_german_number_format(
+    world: World, master: MasterData, retriever: ContractRetriever
+) -> None:
+    g = _set_with(world, DiscrepancyType.PRICE_ABOVE_CONTRACT)
+    [finding] = _run(world, master, retriever, g, DeterministicAdjudicator()).findings
+    text = finding.explanation_de
+    actual = finding.actual or ""
+    assert actual.replace(".", ",") in text and " €" in text
+    assert f"{actual} €" not in text or "," in actual  # no English-style "17.20 €"
+
+
+def test_every_finding_type_has_a_german_explanation() -> None:
+    from belegfluss.agent.adjudicator import _template_de
+    from belegfluss.domain.discrepancies import Discrepancy
+
+    for kind in DiscrepancyType:
+        f = Discrepancy(type=kind, position=1, sku="X", expected="19", actual="7")
+        text = _template_de(kind, f, "§ 3")
+        assert text and kind.value not in text
+
+
+@pytest.mark.parametrize(
+    ("kind", "must_contain"),
+    [
+        (DiscrepancyType.QUANTITY_EXCEEDS_DELIVERY, ("gelieferten", "Lieferschein")),
+        (DiscrepancyType.BANK_DETAILS_CHANGED, ("Konto", "IBAN")),
+    ],
+)
+def test_quote_is_the_sentence_that_supports_the_finding(
+    world: World,
+    master: MasterData,
+    retriever: ContractRetriever,
+    kind: DiscrepancyType,
+    must_contain: tuple[str, ...],
+) -> None:
+    """Regression: the first clause sentence ('Teillieferungen sind zulässig') was quoted as
+    evidence for a quantity finding, although it argues for the supplier."""
+    g = _set_with(world, kind)
+    [finding] = _run(world, master, retriever, g, DeterministicAdjudicator()).findings
+    assert finding.verified and finding.quote
+    assert any(word in finding.quote for word in must_contain), finding.quote
+    assert "Teillieferungen sind zulässig" not in finding.quote
+
+
+def test_result_carries_the_master_data_supplier_name(
+    world: World, master: MasterData, retriever: ContractRetriever
+) -> None:
+    g = generate_set(random.Random(3), world, 1, p_discrepant=0.0)
+    result = _run(world, master, retriever, g, DeterministicAdjudicator())
+    assert result.supplier_name == g.supplier.party.name

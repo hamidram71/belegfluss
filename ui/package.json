@@ -1,0 +1,13 @@
+{
+  "name": "belegfluss-ui",
+  "private": true,
+  "version": "0.5.0",
+  "description": "Review UI for Belegfluss. Compiled into src/belegfluss/ui/app.js, which is committed so the Python package needs no Node at install time.",
+  "scripts": {
+    "build": "tsc -p .",
+    "check": "tsc -p . --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

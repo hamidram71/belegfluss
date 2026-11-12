@@ -10,12 +10,15 @@ the model.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import operator
+import time
+from collections.abc import Callable
+from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from belegfluss.agent.adjudicator import Adjudicator, FindingContext
-from belegfluss.agent.models import FindingJudgement, MatchResult, ReviewFinding
+from belegfluss.agent.models import FindingJudgement, MatchResult, ReviewFinding, TraceStep
 from belegfluss.agent.verify import verify
 from belegfluss.checks.plausibility import PlausibilityIssue, check_plausibility
 from belegfluss.checks.rules import run_rules
@@ -40,6 +43,26 @@ class MatchState(TypedDict, total=False):
     usage: LLMUsage
     reviewed: list[ReviewFinding]
     result: MatchResult
+    # Each node appends its own step; LangGraph merges the lists with operator.add.
+    trace: Annotated[list[TraceStep], operator.add]
+
+
+def _timed(name: str, node: Callable[[MatchState], MatchState]) -> Any:
+    """Wrap a node so it records its duration (and model usage) in the trace."""
+
+    def run(state: MatchState) -> MatchState:
+        start = time.perf_counter()
+        update = node(state)
+        usage = update.get("usage") if name == "adjudicate" else None
+        step = TraceStep(
+            step=name,
+            duration_ms=round((time.perf_counter() - start) * 1000),
+            input_tokens=usage.input_tokens if usage else 0,
+            output_tokens=usage.output_tokens if usage else 0,
+        )
+        return {**update, "trace": [step]}
+
+    return run
 
 
 def build_match_graph(
@@ -89,6 +112,11 @@ def build_match_graph(
         result = MatchResult(
             invoice_number=invoice.invoice_number,
             supplier_id=invoice.seller.party_id,
+            # The master-data name, not the printed one: a clerk recognises it, and a misread
+            # name on a scan does not end up in the review queue.
+            supplier_name=(
+                record.party.name if (record := master.supplier(invoice.seller.party_id)) else None
+            ),
             po_number=state["order"].po_number,
             decision=Decision.REVIEW if reviewed or issues else Decision.APPROVE,
             findings=reviewed,
@@ -100,12 +128,12 @@ def build_match_graph(
         return {"result": result}
 
     graph = StateGraph(MatchState)
-    graph.add_node("rules", rules)
-    graph.add_node("plausibility", plausibility)
-    graph.add_node("retrieve", retrieve)
-    graph.add_node("adjudicate", adjudicate)
-    graph.add_node("verify", verify_all)
-    graph.add_node("decide", decide)
+    graph.add_node("rules", _timed("rules", rules))
+    graph.add_node("plausibility", _timed("plausibility", plausibility))
+    graph.add_node("retrieve", _timed("retrieve", retrieve))
+    graph.add_node("adjudicate", _timed("adjudicate", adjudicate))
+    graph.add_node("verify", _timed("verify", verify_all))
+    graph.add_node("decide", _timed("decide", decide))
     graph.add_edge(START, "rules")
     graph.add_edge("rules", "plausibility")
     graph.add_conditional_edges("plausibility", needs_evidence, ["retrieve", "decide"])
@@ -124,8 +152,16 @@ def match(
     known_orders: set[str] | None = None,
     warnings: list[str] | None = None,
     security_flags: list[str] | None = None,
+    prior_steps: list[TraceStep] | None = None,
 ) -> MatchResult:
-    state: MatchState = {"invoice": invoice, "order": order, "delivery": delivery}
+    """Run the workflow. ``prior_steps`` (e.g. extraction, measured by the caller) are put at
+    the front of the trace; token totals cover all steps."""
+    state: MatchState = {
+        "invoice": invoice,
+        "order": order,
+        "delivery": delivery,
+        "trace": list(prior_steps or []),
+    }
     if known_orders is not None:
         state["known_orders"] = known_orders
     if warnings:
@@ -133,5 +169,13 @@ def match(
     if security_flags:
         state["security_flags"] = security_flags
     final = graph.invoke(state)
+    steps: list[TraceStep] = final["trace"]
     result: MatchResult = final["result"]
-    return result
+    return result.model_copy(
+        update={
+            "trace": steps,
+            "duration_ms": sum(step.duration_ms for step in steps),
+            "llm_input_tokens": sum(step.input_tokens for step in steps),
+            "llm_output_tokens": sum(step.output_tokens for step in steps),
+        }
+    )

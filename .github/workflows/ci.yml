@@ -62,6 +62,23 @@ jobs:
       - name: Test
         run: pytest
 
+  ui:
+    # The compiled UI (src/belegfluss/ui/app.js) is committed so the Python package needs no
+    # Node. This job type-checks the TypeScript source and fails if the committed build is stale.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Type check and build
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - name: Committed build is up to date
+        run: git diff --exit-code -- src/belegfluss/ui/app.js
+
   infra:
     runs-on: ubuntu-latest
     steps:

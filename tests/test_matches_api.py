@@ -140,3 +140,53 @@ def test_misconfiguration_gives_a_clear_503(
         "/v1/matches", json={"invoice_document_id": "x", "delivery_note_document_id": "y"}
     )
     assert response.status_code == 503 and "needs a configured LLM" in response.text
+
+
+def _llm_responses(root: Path, truth: GroundTruthSet) -> FakeLLM:
+    responses: list[Any] = []
+    for ref in truth.documents:
+        if ref.format in LLM_FORMATS:
+            responses.append(
+                transcribe_invoice(truth.invoice)
+                if ref.kind.value == "invoice"
+                else transcribe_delivery_note(truth.delivery_note)
+            )
+    responses.sort(key=lambda r: type(r).__name__ != "ExtractedInvoice")
+    return FakeLLM(responses)
+
+
+def test_trace_and_stats(harness: Harness) -> None:
+    truths = harness.truths()[:4]
+    for truth in truths:
+        record = harness.client.post("/v1/matches", json=harness.upload(truth)).json()
+        steps = [s["step"] for s in record["result"]["trace"]]
+        assert steps[:4] == ["extract_invoice", "extract_delivery_note", "rules", "plausibility"]
+        assert steps[-1] == "decide"
+        assert record["result"]["duration_ms"] == sum(
+            s["duration_ms"] for s in record["result"]["trace"]
+        )
+    stats = harness.client.get("/v1/stats").json()
+    assert stats["matches"] == 4 and sum(stats["by_status"].values()) == 4
+    reviews = sum(t.decision.value == "review" for t in truths)
+    assert stats["by_status"].get("open", 0) == reviews
+    assert stats["estimated_cost_usd"] is None  # no prices configured
+
+
+def test_demo_sets_and_one_click_match(harness: Harness) -> None:
+    listed = harness.client.get("/v1/demo/sets").json()
+    assert [s["set_id"] for s in listed] == [t.set_id for t in harness.truths()]
+    truth = next(t for t in harness.truths() if t.decision.value == "review")
+    harness.llm = _llm_responses(harness.root, truth)
+    response = harness.client.post(f"/v1/demo/sets/{truth.set_id}/match")
+    assert response.status_code == 201
+    assert response.json()["result"]["decision"] == "review"
+    for bad in ("SET-9999", "SET-0001x", "..", "set-0001"):
+        assert harness.client.post(f"/v1/demo/sets/{bad}/match").status_code == 404
+
+
+def test_cost_estimate_only_with_configured_prices() -> None:
+    from belegfluss.api.routes.matches import estimated_cost
+
+    assert estimated_cost(Settings(), 1_000_000, 1_000_000) is None
+    priced = Settings(llm_input_usd_per_mtok=0.1, llm_output_usd_per_mtok=0.5)
+    assert estimated_cost(priced, 1_000_000, 2_000_000) == 1.1

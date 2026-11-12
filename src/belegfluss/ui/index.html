@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Belegfluss – Rechnungsprüfung</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand">
+      <h1>Belegfluss</h1>
+      <p>Rechnungen gegen Bestellung, Lieferschein und Rahmenvertrag prüfen</p>
+    </div>
+    <dl id="stats" class="stats" aria-label="Kennzahlen"></dl>
+  </header>
+
+  <p id="message" class="message" role="alert" hidden></p>
+
+  <main class="desk">
+    <aside class="inbox">
+      <section aria-labelledby="demo-heading">
+        <h2 id="demo-heading">Beispiel prüfen</h2>
+        <ul id="demo-sets" class="demo-sets"></ul>
+      </section>
+
+      <section aria-labelledby="upload-heading">
+        <h2 id="upload-heading">Eigene Belege prüfen</h2>
+        <form id="upload-form" class="upload">
+          <label for="invoice-file">Rechnung</label>
+          <input id="invoice-file" type="file" accept=".xml,.pdf,.png,.jpg,.jpeg">
+          <label for="note-file">Lieferschein</label>
+          <input id="note-file" type="file" accept=".pdf,.png,.jpg,.jpeg">
+          <button id="upload-button" type="submit">Belege prüfen</button>
+        </form>
+      </section>
+
+      <section aria-labelledby="queue-heading">
+        <h2 id="queue-heading">Zu prüfen <span id="queue-count"></span></h2>
+        <ul id="queue" class="queue"></ul>
+      </section>
+    </aside>
+
+    <section id="sheet" class="sheet" aria-live="polite">
+      <p class="empty sheet-empty">Wählen Sie links ein Beispiel oder eine offene Rechnung.</p>
+    </section>
+  </main>
+</body>
+</html>

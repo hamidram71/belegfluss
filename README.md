@@ -2,14 +2,16 @@
 
 **An AI agent (in development) that reconciles supplier invoices with purchase orders, delivery notes and framework contracts, and only escalates what a human really needs to look at.**
 
-[![CI](https://github.com/hamidram71/belegfluss/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-github-user>/belegfluss/actions/workflows/ci.yml)
+[![CI](https://github.com/<your-github-user>/belegfluss/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-github-user>/belegfluss/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%20%7C%203.15-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> Status: **delivery 4 of 4 in progress**. Extraction, rule-based checks, contract retrieval
-> (RAG), the matching agent, a human review queue, prompt-injection defences, a read-only MCP
-> server and an Azure deployment work and are evaluated with a real model. Next: tracing,
-> a small review UI and a demo (see [Roadmap](#roadmap)).
+> Status: **all four deliveries done.** Extraction, rule-based checks, contract retrieval
+> (RAG), the matching agent, a review UI with a human decision step, prompt-injection
+> defences, tracing, a read-only MCP server and an Azure deployment work and are evaluated
+> with a real model.
+
+![Review UI: an invoice with two findings, each explained in German and backed by the highlighted contract sentence](docs/images/review-ui.png)
 
 ## Why
 
@@ -136,12 +138,21 @@ make check            # ruff, mypy --strict, pytest
 make data             # 200 labelled sets in data/synthetic
 cp .env.example .env  # then set OPENAI_API_KEY
 make db-up            # PostgreSQL + pgvector
-make run              # API on http://localhost:8000/docs
+make run              # review UI on http://localhost:8000/, API docs on /docs
 ```
 
 Without a database URL the contract index is kept in memory; without `BELEGFLUSS_EMBEDDING_MODEL`
 an offline lexical embedder is used, and without an LLM the deterministic adjudicator. E-invoices
 never need a key. The whole stack also runs with `docker compose up --build`.
+
+### The review UI
+
+`http://localhost:8000/` opens the review UI (German): pick a sample set or upload an invoice
+and a delivery note, see the decision as a stamp, every finding with its German explanation and
+the highlighted contract sentence that proves it, then approve or reject with your name and a
+comment. A collapsible trace shows each step's duration and model tokens. Design and security
+decisions: [ADR 0011](docs/adr/0011-review-ui.md). The TypeScript source is in `ui/`; the
+compiled `app.js` is committed and CI checks it is up to date.
 
 ### Matching through the API
 
@@ -156,7 +167,12 @@ curl -X POST http://localhost:8000/v1/matches/<match_id>/decision -H "Content-Ty
 ```
 
 A match result lists every finding with the cited clause, the verbatim quote, a German
-explanation and whether the citation was verified, plus any plausibility or security issue.
+explanation and whether the citation was verified, plus any plausibility or security issue, and
+a trace: duration and tokens per step (extraction, rules, retrieval, adjudication, decision).
+`GET /v1/stats` aggregates all matches; `GET /v1/demo/sets` and
+`POST /v1/demo/sets/{set_id}/match` run a shipped sample in one call. Problems with the model
+provider (rejected key, no credit, unknown model) come back as a 503 that says what to fix;
+anything unexpected returns only an error id, and the details go to the log.
 
 ### MCP server for AI assistants
 
@@ -213,9 +229,11 @@ src/belegfluss/
   agent/         LangGraph workflow, adjudicators, verification
   security/      PDF screening, PII masking
   evaluation/    extraction, checks, agent and injection evaluations (belegfluss-eval)
-  api/           FastAPI: documents, extraction, matches, review queue
+  api/           FastAPI: documents, extraction, matches, review queue, stats, demo, error handling
+  ui/            compiled review UI (index.html, styles.css, app.js)
   mcp_server.py  read-only MCP server (belegfluss-mcp)
   runtime.py     builds the configured components for API, CLIs and MCP server
+ui/              TypeScript source of the review UI
 tests/           unit, integration (incl. real pgvector in CI), API and MCP client tests
 docs/adr/        architecture decision records
 ```
@@ -232,6 +250,7 @@ docs/adr/        architecture decision records
 - [ADR 0008 – The matching agent: the model proposes, code verifies](docs/adr/0008-agent-proposes-code-verifies.md)
 - [ADR 0009 – Documents are untrusted: layered defences against prompt injection](docs/adr/0009-documents-are-untrusted.md)
 - [ADR 0010 – Deployment on an Azure free account](docs/adr/0010-azure-free-account-deployment.md)
+- [ADR 0011 – A small review UI, served by the API](docs/adr/0011-review-ui.md)
 
 ## Related work
 
@@ -258,7 +277,7 @@ Where Belegfluss puts its weight:
 - [x] **Delivery 1** – Repo, CI, domain model, synthetic dataset generator, intake API
 - [x] **Delivery 2** – E-invoice parsing, LLM extraction for PDFs and scans, rule-based checks, evaluation harness
 - [x] **Delivery 3** – RAG over contracts (pgvector), LangGraph matching agent with verified citations, plausibility checks, review queue, prompt-injection test set and screening, PII masking, read-only MCP server
-- [ ] **Delivery 4** – Fixes from the full evaluation (IBAN misreads, decision-relevant metric, hybrid adjudicator), deployment on Azure (done); tracing, review UI, demo (next)
+- [x] **Delivery 4** – Fixes from the full evaluation (IBAN misreads, decision-relevant metric, hybrid adjudicator), deployment on Azure, review UI, tracing and statistics, clear provider errors, one-click demo
 
 ## Known limitations
 
